@@ -1,0 +1,77 @@
+services:
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: hireme
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-omar213ahmed}
+      POSTGRES_DB: hireme
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hireme -d hireme"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://hireme:${POSTGRES_PASSWORD:-changeme}@postgres:5432/hireme
+      REDIS_URL: redis://redis:6379/0
+      GLINER_ONNX_DIR: /app/onnx_models/gliner
+      BGE_M3_ONNX_DIR: /app/onnx_models/bge-m3-int8
+      RERANKER_ONNX_DIR: /app/onnx_models/bge-reranker-int8
+    volumes:
+      - ${ONNX_MODELS_DIR:-/home/omar-ahmed/onnx_models}:/app/onnx_models:ro
+      - candidate_files:/app/files
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build: .
+    restart: unless-stopped
+    command: ["celery", "-A", "pipeline.celery_app", "worker", "--loglevel=info"]
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://hireme:${POSTGRES_PASSWORD:-changeme}@postgres:5432/hireme
+      REDIS_URL: redis://redis:6379/0
+      GLINER_ONNX_DIR: /app/onnx_models/gliner
+      BGE_M3_ONNX_DIR: /app/onnx_models/bge-m3-int8
+      RERANKER_ONNX_DIR: /app/onnx_models/bge-reranker-int8
+    volumes:
+      - ${ONNX_MODELS_DIR:-/home/omar-ahmed/onnx_models}:/app/onnx_models:ro
+      - candidate_files:/app/files
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  candidate_files:
